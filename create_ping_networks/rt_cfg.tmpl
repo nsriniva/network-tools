@@ -1,0 +1,3 @@
+{% for nw_route in nw_routes %}
+router static address-family ipv6 unicast {{nw_route}} {{next_hop}}
+{% endfor %}

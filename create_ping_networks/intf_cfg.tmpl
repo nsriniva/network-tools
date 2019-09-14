@@ -1,0 +1,6 @@
+{% for intf in intfs %}
+interface {{intf.name}}
+ ipv6 address {{intf.addr}}/64
+ ipv6 unreachable disable
+ no shut
+{% endfor %}
