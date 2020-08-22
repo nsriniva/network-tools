@@ -40,11 +40,11 @@ class VMNet(dict):
             ip_net = ip_network(ip_addr)
             for vmnet, subnet in self.items():
                 if subnet.supernet_of(ip_net):
-                    return vmnet
+                    return vmnet, subnet.prefixlen
         except Exception as e:
             print(e)
 
-        return -1
+        return -1,-1
 
     def find_vmnets(self):
 
@@ -55,8 +55,9 @@ class VMNet(dict):
             vmbr =  self.ndb\
                         .interfaces\
                         .create(ifname=bname,
-                                kind='bridge')
-            vmbr.commit()
+                                kind='bridge')\
+                        .commit()
+
             return vmbr
 
         for iface in self.ndb.addresses.summary():
@@ -65,22 +66,23 @@ class VMNet(dict):
             iaddr = iface[3]
             intf  = self.ndb.interfaces[iname]
             
-            vmnet = self.find_vmnet(iaddr)
+            vmnet,prefixlen = self.find_vmnet(iaddr)
             if vmnet != -1:
-                self.vmnets[vmnet] = (iname, intf, iaddr, create_bridge( f'vmnet{vmnet}br'))
+                self.vmnets[vmnet] = (iname, intf, iaddr+f'/{prefixlen}', create_bridge( f'vmnet{vmnet}br'))
 
 
     def attach_bridges(self):
 
-        for _, vmnet in self.vmnets:
+        for _, vmnet in self.vmnets.items():
             # shutdown intf
             vmnet[1].set('state','down')\
                     .del_ip(vmnet[2])\
                     .set('state','up')\
-                    .set('master', vmnet[3]['index'])\
                     .commit()
 
-            vmnet[3].add_ip(vmnet[2])\
+            vmnet[3].add_port(vmnet[0])\
+                    .add_ip(vmnet[2])\
+                    .set('br_stp_state', 1)\
                     .set('state','up')\
                     .commit()
             
