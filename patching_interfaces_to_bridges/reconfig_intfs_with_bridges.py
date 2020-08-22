@@ -19,8 +19,8 @@ class VMNet(dict):
         dict.__init__(self)
         self.fname : str = fname
         self.load_vmnet_info(self.fname)
-        self.ipdb = ()
-        self.vmnets:Dict[int, Tuple[str, str, Optional[Interface]]] = {}
+        self.ndb = NDB()
+        self.vmnets:Dict[int, Tuple[str, Interface, str, Optional[Interface]]] = {}
 
     def load_vmnet_info(self, fname:str='vmnet.dat'):
 
@@ -48,19 +48,10 @@ class VMNet(dict):
 
     def find_vmnets(self):
 
-        for intf in self.ndb.addresses.summary():
-            intf = tuple(intf)
-            iname = intf[2]
-            iaddr = intf[3]
-
-            vmnet = self.find_vmnet(iaddr)
-            if vmnet != -1:
-                self.vmnets[vmnet] = (iname, iaddr, f'vmnet{vmnet}br', None)
-
-            
-    def activate_bridges(self):
-
         def create_bridge(bname:str) ->Interface:
+            if self.ndb.interfaces.get(bname) is not None:
+                self.ndb.interfaces[bname].remove().commit()
+
             vmbr =  self.ndb\
                         .interfaces\
                         .create(ifname=bname,
@@ -68,7 +59,29 @@ class VMNet(dict):
             vmbr.commit()
             return vmbr
 
-        for k,v in self.vmnets.items():
-            self.vmnets[k] = (v[0],v[1],v[2],create_bridge(v[2]))
+        for iface in self.ndb.addresses.summary():
+            iface = tuple(iface)
+            iname = iface[2]
+            iaddr = iface[3]
+            intf  = self.ndb.interfaces[iname]
+            
+            vmnet = self.find_vmnet(iaddr)
+            if vmnet != -1:
+                self.vmnets[vmnet] = (iname, intf, iaddr, create_bridge( f'vmnet{vmnet}br'))
+
+
+    def attach_bridges(self):
+
+        for _, vmnet in self.vmnets:
+            # shutdown intf
+            vmnet[1].set('state','down')\
+                    .del_ip(vmnet[2])\
+                    .set('state','up')\
+                    .set('master', vmnet[3]['index'])\
+                    .commit()
+
+            vmnet[3].add_ip(vmnet[2])\
+                    .set('state','up')\
+                    .commit()
             
             
