@@ -20,6 +20,7 @@ class VMNet(dict):
         self.fname : str = fname
         self.load_vmnet_info(self.fname)
         self.ndb = NDB()
+        self.ipr = IPRoute()
         self.vmnets:Dict[int, Tuple[str, Interface, str, Optional[Interface]]] = {}
 
     def load_vmnet_info(self, fname:str='vmnet.dat'):
@@ -40,11 +41,11 @@ class VMNet(dict):
             ip_net = ip_network(ip_addr)
             for vmnet, subnet in self.items():
                 if subnet.supernet_of(ip_net):
-                    return vmnet, subnet.prefixlen
+                    return vmnet, subnet.prefixlen, str(subnet.broadcast_address)
         except Exception as e:
             print(e)
 
-        return -1,-1
+        return -1,-1,''
 
     def find_vmnets(self):
 
@@ -66,9 +67,10 @@ class VMNet(dict):
             iaddr = iface[3]
             intf  = self.ndb.interfaces[iname]
             
-            vmnet,prefixlen = self.find_vmnet(iaddr)
+            vmnet,prefixlen, bcast_addr = self.find_vmnet(iaddr)
+            print(vmnet, prefixlen, bcast_addr)
             if vmnet != -1:
-                self.vmnets[vmnet] = (iname, intf, iaddr+f'/{prefixlen}', create_bridge( f'vmnet{vmnet}br'))
+                self.vmnets[vmnet] = (iname, intf, iaddr, prefixlen, bcast_addr,create_bridge( f'vmnet{vmnet}br'))
 
 
     def attach_bridges(self):
@@ -76,14 +78,31 @@ class VMNet(dict):
         for _, vmnet in self.vmnets.items():
             # shutdown intf
             vmnet[1].set('state','down')\
-                    .del_ip(vmnet[2])\
+                    .del_ip(f'{vmnet[2]}/{vmnet[3]}')\
                     .set('state','up')\
                     .commit()
 
-            vmnet[3].add_port(vmnet[0])\
-                    .add_ip(vmnet[2])\
-                    .set('br_stp_state', 1)\
-                    .set('state','up')\
+            vmnet[5].add_port(vmnet[0])\
                     .commit()
+
+            self.ipr.addr('add', index=vmnet[5]['index'],
+                          address=vmnet[2], mask=vmnet[3], broadcast=vmnet[4])
+
+
+            self.ipr.link('set', index=vmnet[5]['index'], state='up')
+
+    def detach_bridges(self):
+
+        for _, vmnet in self.vmnets.items():
+            vmnet[5].remove().commit()
             
-            
+            # shutdown intf
+            vmnet[1].set('state','down')\
+                    .commit()
+
+
+            self.ipr.addr('add', index=vmnet[1]['index'],
+                          address=vmnet[2], mask=vmnet[3], broadcast=vmnet[4])
+
+
+            self.ipr.link('set', index=vmnet[1]['index'], state='up')
